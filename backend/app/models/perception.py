@@ -177,3 +177,17 @@ class PhysicalSystemBuildResult(BaseModel):
     accepted_observations: list[str] = Field(default_factory=list)
     unresolved_observations: list[str] = Field(default_factory=list)
     issues: list[PerceptionIssue] = Field(default_factory=list)
+
+
+class PerceptionRequest(BaseModel):
+    """Identifies what perception input to analyze (Milestone 4A).
+
+    For now this only ever names a known development fixture -- no image
+    data, no filesystem path, nothing resembling real computer-vision
+    input. A future SAM-backed provider may need a different concrete
+    request shape (e.g. referencing an uploaded image); this model is
+    deliberately just enough for the fixture provider, not a general
+    perception-input schema.
+    """
+
+    fixture_id: str = Field(..., min_length=1, description="A known fixture identifier.")

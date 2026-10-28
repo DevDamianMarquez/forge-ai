@@ -101,3 +101,27 @@ This repository currently contains:
 No application logic, AI integrations, or physics tools have been implemented yet.
 
 This architecture was reviewed once against Meta's official hackathon reference workshop, [`meta-models/legal-agent-workshop`](https://github.com/meta-models/legal-agent-workshop), for architectural patterns only — not its legal domain, code, or prompts. See `docs/architecture.md` §10 for what was adopted, what was deliberately left out, and a credential correction to `.env.example`.
+
+## 9. Running Locally
+
+**Backend** (FastAPI):
+
+```bash
+cd backend
+pip install -r ../requirements.txt
+uvicorn app.main:app --reload
+```
+
+Runs at `http://localhost:8000`. Run the test suite with `pytest` from `backend/`.
+
+**Frontend** (Next.js demo UI — see [`frontend/README.md`](frontend/README.md) for details):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Runs at `http://localhost:3000` and calls the backend above. Configure the backend URL via `NEXT_PUBLIC_FORGE_API_URL` (see `frontend/.env.example`); configure which frontend origins the backend accepts via `FORGE_CORS_ORIGINS` (see `.env.example`) — both default to the values above for local development.
+
+The frontend's scenario selector currently runs against **deterministic synthetic perception fixtures** (`simple_gear_pair`, `compound_gear_train`, `uncertain_gear_pair`) served by the backend, not real image analysis — this will later be replaced by SAM-backed perception without changing the rest of the pipeline.

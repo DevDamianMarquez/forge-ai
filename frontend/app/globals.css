@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+:root {
+  --forge-bg: #06090f;
+  --forge-bg-grid: #0a0f18;
+  --forge-panel: #0d131d;
+  --forge-panel-raised: #111827;
+  --forge-border: #1d2838;
+  --forge-border-strong: #2a3a52;
+
+  --forge-text: #e7ecf5;
+  --forge-text-muted: #8a95ab;
+  --forge-text-dim: #5b6578;
+
+  --forge-accent: #38bdf8;
+  --forge-accent-strong: #67e8f9;
+
+  --forge-verified: #34d399;
+  --forge-verified-dim: #0f3d30;
+
+  --forge-warning: #f59e0b;
+  --forge-warning-dim: #3f2d0c;
+
+  --forge-danger: #f87171;
+  --forge-danger-dim: #3f1414;
+
+  --forge-mono: var(--font-geist-mono), "SF Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+@theme inline {
+  --color-forge-bg: var(--forge-bg);
+  --color-forge-panel: var(--forge-panel);
+  --color-forge-panel-raised: var(--forge-panel-raised);
+  --color-forge-border: var(--forge-border);
+  --color-forge-border-strong: var(--forge-border-strong);
+  --color-forge-text: var(--forge-text);
+  --color-forge-text-muted: var(--forge-text-muted);
+  --color-forge-text-dim: var(--forge-text-dim);
+  --color-forge-accent: var(--forge-accent);
+  --color-forge-accent-strong: var(--forge-accent-strong);
+  --color-forge-verified: var(--forge-verified);
+  --color-forge-verified-dim: var(--forge-verified-dim);
+  --color-forge-warning: var(--forge-warning);
+  --color-forge-warning-dim: var(--forge-warning-dim);
+  --color-forge-danger: var(--forge-danger);
+  --color-forge-danger-dim: var(--forge-danger-dim);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--forge-mono);
+}
+
+* {
+  border-color: var(--forge-border);
+}
+
+html,
+body {
+  background: var(--forge-bg);
+  color: var(--forge-text);
+}
+
+body {
+  background-image:
+    linear-gradient(var(--forge-bg-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--forge-bg-grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-attachment: fixed;
+}
+
+::selection {
+  background: var(--forge-accent);
+  color: #04141c;
+}
+
+:focus-visible {
+  outline: 2px solid var(--forge-accent);
+  outline-offset: 2px;
+}
+
+.forge-glow-verified {
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.25), 0 0 24px -4px rgba(52, 211, 153, 0.35);
+}
+
+.forge-glow-accent {
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2), 0 0 20px -6px rgba(56, 189, 248, 0.3);
+}
+
+.forge-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--forge-border-strong) transparent;
+}

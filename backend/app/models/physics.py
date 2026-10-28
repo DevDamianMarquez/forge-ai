@@ -136,3 +136,154 @@ class ExperimentResult(BaseModel):
     error: str | None = None
     metrics: dict[str, float] = Field(default_factory=dict)
     constraint_results: list[ConstraintResult] = Field(default_factory=list)
+
+
+class Shaft(BaseModel):
+    """A rigid shaft. Every gear mounted on the same shaft turns together --
+    same RPM, same direction -- which is what lets a compound gear train
+    exist (Milestone 1's GearTrain already assumed this; PhysicalSystem
+    makes the shaft itself an explicit, separate object instead of an
+    assumption baked into stage ordering).
+    """
+
+    id: str = Field(..., min_length=1, description="Unique identifier for this shaft.")
+    label: str | None = Field(default=None, description="Optional human-readable label.")
+
+
+class SystemGear(BaseModel):
+    """A gear in an explicit PhysicalSystem topology, mounted on one shaft.
+
+    Distinct from ``Gear`` (the low-level unit inside a compiled
+    ``GearConnection``/``GearTrain``): a ``SystemGear`` additionally knows
+    which shaft it is mounted on, which is exactly the information
+    ``app.physics.topology`` needs to determine the transmission path.
+    """
+
+    id: str = Field(..., min_length=1, description="Unique identifier for this gear.")
+    teeth: int = Field(..., gt=0, description="Number of teeth. Must be a positive integer.")
+    shaft_id: str = Field(..., min_length=1, description="The shaft this gear is mounted on.")
+    label: str | None = Field(default=None, description="Optional human-readable label.")
+
+
+class GearMesh(BaseModel):
+    """One external mesh between two gears, identified by id.
+
+    Order does not matter: a mesh between "a" and "b" is the same mesh as
+    one between "b" and "a" -- PhysicalSystem's validation treats them as
+    duplicates of each other, not two different meshes.
+    """
+
+    gear_a_id: str = Field(..., min_length=1)
+    gear_b_id: str = Field(..., min_length=1)
+
+
+class PhysicalSystem(BaseModel):
+    """An explicit physical topology: shafts, the gears mounted on them, and
+    which gears mesh.
+
+    This is the higher-level representation SAM/Muse will eventually
+    populate from perception. It carries no physics itself:
+    ``app.physics.topology`` compiles it into the existing Milestone 1
+    ``GearTrain``, and the existing deterministic physics engine
+    (``app.physics.experiments``) produces the actual numbers from that --
+    topology code owns topology, the physics engine owns physics.
+
+    Milestone 3A scope: a single, unbranched, acyclic transmission path
+    only. Branches, multiple possible paths, disconnected outputs, and
+    cycles are rejected by the compiler rather than guessed at (see
+    ``app.physics.topology.UnsupportedTopologyError``).
+    """
+
+    shafts: list[Shaft] = Field(..., min_length=1)
+    gears: list[SystemGear] = Field(..., min_length=1)
+    meshes: list[GearMesh] = Field(..., min_length=1)
+    input_shaft_id: str = Field(..., min_length=1, description="Where input RPM is applied.")
+    input_rpm: float = Field(..., gt=0, description="Input shaft speed in RPM. Must be positive.")
+    output_shaft_id: str | None = Field(
+        default=None,
+        description=(
+            "Where the transmission path ends. If omitted, the compiler infers "
+            "it, but only if the input shaft is itself one end of an "
+            "unambiguous chain -- otherwise it is rejected as ambiguous."
+        ),
+    )
+    constraints: list[Constraint] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_topology_shape(self) -> "PhysicalSystem":
+        shaft_ids = [shaft.id for shaft in self.shafts]
+        if len(shaft_ids) != len(set(shaft_ids)):
+            raise ValueError("shaft ids must be unique")
+
+        gear_ids = [gear.id for gear in self.gears]
+        if len(gear_ids) != len(set(gear_ids)):
+            raise ValueError("gear ids must be unique")
+
+        shaft_id_set = set(shaft_ids)
+        gear_by_id = {gear.id: gear for gear in self.gears}
+
+        for gear in self.gears:
+            if gear.shaft_id not in shaft_id_set:
+                raise ValueError(f"gear {gear.id!r} references unknown shaft {gear.shaft_id!r}")
+
+        if self.input_shaft_id not in shaft_id_set:
+            raise ValueError(f"input_shaft_id {self.input_shaft_id!r} does not exist")
+
+        if self.output_shaft_id is not None and self.output_shaft_id not in shaft_id_set:
+            raise ValueError(f"output_shaft_id {self.output_shaft_id!r} does not exist")
+
+        seen_pairs: set[frozenset[str]] = set()
+        for mesh in self.meshes:
+            if mesh.gear_a_id not in gear_by_id:
+                raise ValueError(f"mesh references unknown gear {mesh.gear_a_id!r}")
+            if mesh.gear_b_id not in gear_by_id:
+                raise ValueError(f"mesh references unknown gear {mesh.gear_b_id!r}")
+            if mesh.gear_a_id == mesh.gear_b_id:
+                raise ValueError(f"gear {mesh.gear_a_id!r} cannot mesh with itself")
+
+            gear_a = gear_by_id[mesh.gear_a_id]
+            gear_b = gear_by_id[mesh.gear_b_id]
+            if gear_a.shaft_id == gear_b.shaft_id:
+                raise ValueError(
+                    f"gears {gear_a.id!r} and {gear_b.id!r} are both on shaft "
+                    f"{gear_a.shaft_id!r} and cannot mesh with each other"
+                )
+
+            pair = frozenset((mesh.gear_a_id, mesh.gear_b_id))
+            if pair in seen_pairs:
+                raise ValueError(
+                    f"duplicate mesh between {mesh.gear_a_id!r} and {mesh.gear_b_id!r}"
+                )
+            seen_pairs.add(pair)
+
+        return self
+
+
+class CompiledTopology(BaseModel):
+    """What the topology compiler determined before handing off to the physics engine.
+
+    Small and specific on purpose -- enough to explain which path was
+    selected and why, not a general provenance framework.
+    """
+
+    input_shaft_id: str
+    output_shaft_id: str
+    shaft_path: list[str] = Field(
+        description="Ordered shaft ids from the input shaft to the output shaft."
+    )
+    gear_meshes_used: list[GearMesh] = Field(
+        description="The actual meshes, in path order, that formed the transmission path."
+    )
+    gear_train: GearTrain = Field(
+        description="The compiled Milestone 1 GearTrain -- its connections are the stages."
+    )
+
+
+class PhysicalSystemExperimentResult(BaseModel):
+    """The full result of running an experiment on an explicit PhysicalSystem:
+    how its topology was compiled, plus the deterministic ExperimentResult
+    produced by the unchanged Milestone 1 physics engine.
+    """
+
+    topology: CompiledTopology
+    experiment: ExperimentResult

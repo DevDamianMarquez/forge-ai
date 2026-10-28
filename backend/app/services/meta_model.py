@@ -12,6 +12,11 @@ abstraction; it exists to (1) configure that one client correctly and (2) be
 trivially injectable/mockable, so the pytest suite never performs a real
 Meta API call. Anything that needs to talk to Muse Spark depends on the
 ``MuseSparkClient`` protocol below, not on this concrete class.
+
+On import, this module loads ``backend/.env`` (if present) via
+``app.core.env.load_backend_env`` so a locally configured MODEL_API_KEY is
+picked up automatically -- without ever overriding a value the process
+environment already set explicitly. See that module for details.
 """
 
 from __future__ import annotations
@@ -22,6 +27,10 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from openai import OpenAI
+
+from app.core.env import load_backend_env
+
+load_backend_env()
 
 DEFAULT_BASE_URL = "https://api.meta.ai/v1"
 DEFAULT_MODEL = "muse-spark-1.3"

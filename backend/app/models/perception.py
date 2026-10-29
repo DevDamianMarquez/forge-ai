@@ -86,15 +86,27 @@ class PerceivedGear(BaseModel):
     tracked separately from its attribute values: a gear might be confirmed
     to exist while its tooth count or shaft assignment is still only
     inferred, observed, or unresolved.
+
+    ``confidence`` is ``None`` when the observing source gave no confidence
+    score at all (e.g. a vision model that sometimes omits one) -- this is
+    different from a low confidence value, and must never be defaulted to a
+    number, since that would fabricate a score the source never gave.
+
+    ``teeth`` and ``shaft_id`` are ``None`` when the source never proposed
+    any value for that field at all -- distinct from proposing a value that
+    is merely unconfirmed. A vision model that can only see that something
+    gear-shaped exists (and nothing about its tooth count or which shaft it
+    sits on) represents that honestly as ``None``, not as a fabricated
+    guess with a low-confidence/unresolved status.
     """
 
     id: str = Field(..., min_length=1)
     label: str | None = None
     source: ObservationSource
-    confidence: float = Field(..., ge=0.0, le=1.0)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     status: ObservationStatus
-    teeth: ObservedValue[int]
-    shaft_id: ObservedValue[str]
+    teeth: ObservedValue[int] | None = None
+    shaft_id: ObservedValue[str] | None = None
 
 
 class PerceivedGearMesh(BaseModel):
@@ -122,8 +134,23 @@ class PerceptionResult(BaseModel):
     shafts: list[PerceivedShaft] = Field(default_factory=list)
     gears: list[PerceivedGear] = Field(default_factory=list)
     meshes: list[PerceivedGearMesh] = Field(default_factory=list)
-    input_shaft_id: ObservedValue[str]
-    input_rpm: ObservedValue[float]
+    input_shaft_id: ObservedValue[str] | None = Field(
+        default=None,
+        description=(
+            "None when no source has proposed an input shaft at all (e.g. a "
+            "vision-only perception that cannot observe RPM/shaft role from "
+            "a static image) -- app.perception.builder treats this exactly "
+            "like any other unconfirmed-or-absent required field, producing "
+            "a structured refusal rather than a fabricated value."
+        ),
+    )
+    input_rpm: ObservedValue[float] | None = Field(
+        default=None,
+        description=(
+            "None when no source has proposed an input RPM at all -- never "
+            "fabricated just to satisfy this field."
+        ),
+    )
     output_shaft_id: ObservedValue[str] | None = Field(
         default=None,
         description=(
@@ -191,3 +218,21 @@ class PerceptionRequest(BaseModel):
     """
 
     fixture_id: str = Field(..., min_length=1, description="A known fixture identifier.")
+
+
+class ImagePerceptionRequest(BaseModel):
+    """Identifies image input for a vision-model-backed provider (Milestone 6C).
+
+    A sibling to ``PerceptionRequest``, not a replacement: that model stays
+    exactly as it was for the fixture provider. This model represents image
+    input -- a prompt plus either a public URL or local bytes, mirroring
+    ``app.sam.client.SAMClient.analyze_image``'s own parameters exactly --
+    never physical truth. It carries no teeth count, no shaft id, no RPM:
+    nothing here is a claim about the mechanical system, only about what
+    image and prompt to analyze.
+    """
+
+    prompt: str = Field(..., min_length=1, description="Short concept prompt, e.g. 'gear'.")
+    image_url: str | None = None
+    image_bytes: bytes | None = None
+    image_mime_type: str | None = None

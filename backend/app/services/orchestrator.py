@@ -18,7 +18,11 @@ from typing import Any, Literal
 
 from app.models.physics import ExperimentResult
 from app.services.forge_tools import gear_train_experiment_tool_schema
-from app.services.meta_model import MuseResponse, MuseSparkClient
+from app.services.meta_model import (
+    MuseSparkClient,
+    build_assistant_tool_call_message,
+    build_tool_result_message,
+)
 from app.services.tool_dispatcher import (
     InvalidToolArgumentsError,
     UnknownToolError,
@@ -116,7 +120,7 @@ def run_forge_analysis(
                 trace=trace,
             )
 
-        messages.append(_assistant_tool_call_message(response))
+        messages.append(build_assistant_tool_call_message(response))
 
         for call in response.tool_calls:
             # len(experiments) only ever grows on a successful execution, so
@@ -138,7 +142,7 @@ def run_forge_analysis(
                         error=error_message,
                     )
                 )
-                messages.append(_tool_result_message(call.id, {"error": error_message}))
+                messages.append(build_tool_result_message(call.id, {"error": error_message}))
                 continue
 
             try:
@@ -153,7 +157,7 @@ def run_forge_analysis(
                         error=str(exc),
                     )
                 )
-                messages.append(_tool_result_message(call.id, {"error": str(exc)}))
+                messages.append(build_tool_result_message(call.id, {"error": str(exc)}))
                 continue
 
             experiments.append(execution.result)
@@ -167,7 +171,7 @@ def run_forge_analysis(
                 )
             )
             messages.append(
-                _tool_result_message(call.id, execution.result.model_dump(mode="json"))
+                build_tool_result_message(call.id, execution.result.model_dump(mode="json"))
             )
 
     status = "tool_call_limit" if call_limit_exceeded else "tool_round_limit"
@@ -178,22 +182,3 @@ def run_forge_analysis(
         status=status,
         trace=trace,
     )
-
-
-def _assistant_tool_call_message(response: MuseResponse) -> dict[str, Any]:
-    return {
-        "role": "assistant",
-        "content": response.content,
-        "tool_calls": [
-            {
-                "id": call.id,
-                "type": "function",
-                "function": {"name": call.name, "arguments": json.dumps(call.arguments)},
-            }
-            for call in response.tool_calls
-        ],
-    }
-
-
-def _tool_result_message(tool_call_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return {"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(payload)}

@@ -110,3 +110,31 @@ class MetaModelClient:
             for call in (message.tool_calls or [])
         ]
         return MuseResponse(content=message.content, tool_calls=tool_calls)
+
+
+def build_assistant_tool_call_message(response: MuseResponse) -> dict[str, Any]:
+    """The OpenAI-style assistant message echoing back requested tool calls.
+
+    Shared by every FORGE orchestration loop that talks to Muse Spark (see
+    ``app.services.orchestrator`` and ``app.services.autonomous_redesign``),
+    so a multi-turn tool-calling conversation is always shaped identically
+    -- this reshapes already-normalized ``MuseResponse``/``ToolCall`` data,
+    it never calls the API itself.
+    """
+    return {
+        "role": "assistant",
+        "content": response.content,
+        "tool_calls": [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {"name": call.name, "arguments": json.dumps(call.arguments)},
+            }
+            for call in response.tool_calls
+        ],
+    }
+
+
+def build_tool_result_message(tool_call_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The OpenAI-style tool-result message for one executed (or rejected) tool call."""
+    return {"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(payload)}

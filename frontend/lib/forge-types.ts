@@ -49,8 +49,14 @@ export interface PerceptionResult {
   shafts: PerceivedShaft[];
   gears: PerceivedGear[];
   meshes: PerceivedGearMesh[];
-  input_shaft_id: ObservedValue<string>;
-  input_rpm: ObservedValue<number>;
+  // Nullable: matches backend/app/models/perception.py exactly. A SAM-only
+  // perception result (before any user confirmation) has neither an
+  // observed input shaft nor an observed input RPM -- a static image
+  // carries no information about either. The fixture provider happens to
+  // always supply both, which is why earlier code treated these as
+  // non-null; that was never actually guaranteed by the backend model.
+  input_shaft_id: ObservedValue<string> | null;
+  input_rpm: ObservedValue<number> | null;
   output_shaft_id: ObservedValue<string> | null;
   notes: string[];
 }
@@ -183,3 +189,95 @@ export interface PhysicalPipelineResult {
 }
 
 export type FixtureId = "simple_gear_pair" | "compound_gear_train" | "uncertain_gear_pair";
+
+/**
+ * Milestone 7A.2 real-image types. These mirror
+ * backend/app/sam/models.py and backend/app/services/image_analysis.py
+ * exactly -- captured from reading those files directly, not guessed.
+ */
+
+/**
+ * One SAM segmentation's box, in the source image's pixel coordinate
+ * space. ``width``/``height`` are the FULL SOURCE IMAGE's pixel
+ * dimensions (not the box's own width/height) -- see
+ * backend/app/sam/parser.py's worked example from Meta's own docs:
+ * "x1=181;y1=365;x2=556;y2=486;w=1516;h=1600". The w/h values there are
+ * far larger than the box's own corner coordinates, so they cannot be the
+ * box's dimensions; x1/y1/x2/y2 are absolute pixel coordinates within an
+ * image of size width x height. See lib/real-image-helpers.ts for the
+ * conversion into on-screen percentages.
+ */
+export interface SAMBoundingBox {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  width: number;
+  height: number;
+  confidence: number | null;
+}
+
+/**
+ * Safe, SAM-specific visual detection geometry for one segmentation.
+ * Deliberately separate from PerceivedGear (which stays provider-
+ * independent and carries no geometry at all). ``id`` always equals the
+ * PerceivedGear id built from the same SAM segmentation.
+ */
+export interface VisualDetection {
+  id: string;
+  frame_index: number;
+  object_index: number;
+  bounding_box: SAMBoundingBox;
+  confidence: number | null;
+  source: ObservationSource;
+  status: ObservationStatus;
+}
+
+/** Response of POST /api/v1/image-analysis/analyze. */
+export interface AnalyzeImageResult {
+  perception: PerceptionResult;
+  detections: VisualDetection[];
+  build_result: PhysicalSystemBuildResult;
+}
+
+/** A shaft the USER explicitly confirms exists. */
+export interface ShaftConfirmation {
+  id: string;
+  label?: string | null;
+}
+
+/**
+ * One gear's user-confirmed physical facts. ``confirmed_exists`` and the
+ * attribute fields (``teeth``/``shaft_id``) are independent: supplying an
+ * attribute never implies existence is confirmed, and vice versa -- this
+ * must match the backend's GearConfirmation contract exactly.
+ */
+export interface GearConfirmation {
+  id: string;
+  confirmed_exists: boolean;
+  teeth?: number | null;
+  shaft_id?: string | null;
+}
+
+/** A gear mesh the USER explicitly confirms exists between two gears. */
+export interface MeshConfirmation {
+  gear_a_id: string;
+  gear_b_id: string;
+}
+
+/** The smallest explicit USER confirmation contract (sent to /confirm). */
+export interface PhysicalConfirmation {
+  shafts: ShaftConfirmation[];
+  gears: GearConfirmation[];
+  meshes: MeshConfirmation[];
+  input_shaft_id?: string | null;
+  input_rpm?: number | null;
+  output_shaft_id?: string | null;
+}
+
+/** Response of POST /api/v1/image-analysis/confirm. */
+export interface ConfirmAndVerifyResult {
+  perception: PerceptionResult;
+  build_result: PhysicalSystemBuildResult;
+  experiment: PhysicalSystemExperimentResult | null;
+}

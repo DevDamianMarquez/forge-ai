@@ -1,4 +1,11 @@
-import type { FixtureId, PhysicalPipelineResult } from "./forge-types.ts";
+import type {
+  AnalyzeImageResult,
+  ConfirmAndVerifyResult,
+  FixtureId,
+  PerceptionResult,
+  PhysicalConfirmation,
+  PhysicalPipelineResult,
+} from "./forge-types.ts";
 
 const DEFAULT_API_URL = "http://localhost:8000";
 
@@ -55,4 +62,74 @@ export async function runFixturePipeline(
   }
 
   return body as PhysicalPipelineResult;
+}
+
+/**
+ * Upload a real mechanism image to SAM 3.1 and get back its visual
+ * detections plus whatever the evidence boundary says is still missing.
+ *
+ * Sends multipart/form-data -- never base64 -- so the browser sets the
+ * Content-Type (with boundary) itself; this function must never set that
+ * header manually. This never computes or guesses a physical value: every
+ * field on the returned AnalyzeImageResult comes directly from the
+ * backend.
+ */
+export async function analyzeImage(
+  image: File,
+  prompt: string,
+  signal?: AbortSignal,
+): Promise<AnalyzeImageResult> {
+  const formData = new FormData();
+  formData.append("image", image);
+  formData.append("prompt", prompt);
+
+  const response = await fetch(`${getApiBaseUrl()}/api/v1/image-analysis/analyze`, {
+    method: "POST",
+    body: formData,
+    signal,
+  });
+
+  const body: unknown = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const detail =
+      body && typeof body === "object" && "detail" in body
+        ? (body as { detail: unknown }).detail
+        : body;
+    throw new ForgeApiError(response.status, detail);
+  }
+
+  return body as AnalyzeImageResult;
+}
+
+/**
+ * Submit explicit USER confirmation (plus the exact PerceptionResult it
+ * applies to, round-tripped from analyzeImage) and get back the evidence
+ * boundary's decision -- and, only if it succeeded, the backend's
+ * deterministic physics result. This function performs no physics and no
+ * physical inference itself; it only moves the request/response.
+ */
+export async function confirmAndVerify(
+  perception: PerceptionResult,
+  confirmation: PhysicalConfirmation,
+  signal?: AbortSignal,
+): Promise<ConfirmAndVerifyResult> {
+  const response = await fetch(`${getApiBaseUrl()}/api/v1/image-analysis/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ perception, confirmation }),
+    signal,
+  });
+
+  const body: unknown = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const detail =
+      body && typeof body === "object" && "detail" in body
+        ? (body as { detail: unknown }).detail
+        : body;
+    throw new ForgeApiError(response.status, detail);
+  }
+
+  return body as ConfirmAndVerifyResult;
 }

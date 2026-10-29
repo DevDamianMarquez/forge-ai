@@ -281,3 +281,76 @@ export interface ConfirmAndVerifyResult {
   build_result: PhysicalSystemBuildResult;
   experiment: PhysicalSystemExperimentResult | null;
 }
+
+/**
+ * Milestone 7B.1/7B.2 autonomous redesign types. These mirror
+ * backend/app/services/autonomous_redesign.py and
+ * backend/app/api/forge.py's AutonomousRedesignRequest exactly -- captured
+ * from reading those files directly, not guessed.
+ */
+
+/** The only two numbers Muse may choose (see MIN_TEETH/MAX_TEETH on the backend). */
+export interface GearRedesignCandidate {
+  input_teeth: number;
+  output_teeth: number;
+}
+
+export type RedesignAttemptStatus =
+  | "passed"
+  | "failed"
+  | "duplicate"
+  | "invalid_response"
+  | "unknown_tool"
+  | "invalid_arguments";
+
+/** One attempt's full, structured record. ``candidate``/``experiment`` are
+ * null exactly when no valid, non-duplicate candidate was actually
+ * evaluated by physics this attempt. */
+export interface RedesignAttempt {
+  attempt_number: number;
+  candidate: GearRedesignCandidate | null;
+  experiment: ExperimentResult | null;
+  status: RedesignAttemptStatus;
+  error: string | null;
+}
+
+export type RedesignStatus = "verified" | "exhausted" | "model_error";
+
+export type RedesignTraceStage =
+  | "objective_received"
+  | "candidate_proposed"
+  | "physics_evaluated"
+  | "constraint_checked"
+  | "evidence_returned"
+  | "design_verified"
+  | "attempts_exhausted"
+  | "invalid_response"
+  | "model_error";
+
+/** One concise, structured action/evidence event -- never chain-of-thought.
+ * ``status`` is a plain string on the backend ("ok" | "failed"), not an enum. */
+export interface RedesignTraceEntry {
+  stage: RedesignTraceStage;
+  status: string;
+  message: string;
+  attempt_number: number | null;
+}
+
+/** Response of POST /api/v1/forge/autonomous-redesign. ``accepted_design``/
+ * ``final_experiment`` are non-null only when ``status === "verified"``. */
+export interface AutonomousRedesignResult {
+  objective: string;
+  status: RedesignStatus;
+  attempts: RedesignAttempt[];
+  accepted_design: GearRedesignCandidate | null;
+  final_experiment: ExperimentResult | null;
+  trace: RedesignTraceEntry[];
+}
+
+/** Request body for POST /api/v1/forge/autonomous-redesign. ``starting_train``
+ * must describe exactly one transmission stage (a single external two-gear
+ * mesh) -- the only topology the backend supports for this milestone. */
+export interface AutonomousRedesignRequest {
+  starting_train: GearTrain;
+  objective_max_output_rpm: number;
+}

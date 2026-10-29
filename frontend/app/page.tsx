@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { AutonomousRedesignPanel } from "@/components/AutonomousRedesignPanel";
 import { DetectionOverlay } from "@/components/DetectionOverlay";
 import { EngineeringTrace } from "@/components/EngineeringTrace";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -15,7 +16,21 @@ import { RealImageResultPanel } from "@/components/RealImageResultPanel";
 import { RealImageTrace } from "@/components/RealImageTrace";
 import { ScenarioSelector } from "@/components/ScenarioSelector";
 import { VerifiedResultPanel } from "@/components/VerifiedResultPanel";
-import { analyzeImage, confirmAndVerify, ForgeApiError, runFixturePipeline } from "@/lib/api";
+import {
+  analyzeImage,
+  confirmAndVerify,
+  ForgeApiError,
+  runAutonomousRedesign,
+  runFixturePipeline,
+} from "@/lib/api";
+import {
+  deriveStartingTrain,
+  INITIAL_REDESIGN_UI_STATE,
+  withObjectiveChanged,
+  withRedesignFailed,
+  withRedesignStarted,
+  withRedesignSucceeded,
+} from "@/lib/autonomous-redesign-helpers";
 import type {
   AnalyzeImageResult,
   ConfirmAndVerifyResult,
@@ -25,6 +40,7 @@ import type {
 import {
   buildPhysicalConfirmation,
   buildRealImageTrace,
+  hasVerifiedPhysics,
   initialGearForms,
   initialSystemForm,
   PreviewUrlTracker,
@@ -149,6 +165,7 @@ const INITIAL_REAL_IMAGE_STATE: RealImageWorkflowState = {
 
 function RealImageWorkflow() {
   const [state, setState] = useState<RealImageWorkflowState>(INITIAL_REAL_IMAGE_STATE);
+  const [redesign, setRedesign] = useState(INITIAL_REDESIGN_UI_STATE);
   const previewUrlTracker = useRef(new PreviewUrlTracker());
 
   // Revoke whatever object URL is still live when this workflow unmounts
@@ -174,6 +191,9 @@ function RealImageWorkflow() {
       previewUrl: nextUrl,
       fileName: file.name,
     });
+    // A new image means a new (not-yet-verified) physical system -- any
+    // previous autonomous redesign result belonged to the old one.
+    setRedesign(INITIAL_REDESIGN_UI_STATE);
 
     try {
       const analysis = await analyzeImage(file, ANALYZE_PROMPT);
@@ -207,6 +227,7 @@ function RealImageWorkflow() {
     const toRevoke = previewUrlTracker.current.replace(null);
     if (toRevoke) URL.revokeObjectURL(toRevoke);
     setState(INITIAL_REAL_IMAGE_STATE);
+    setRedesign(INITIAL_REDESIGN_UI_STATE);
   }
 
   function handleGearFormChange(id: string, patch: Partial<GearConfirmationFormState>) {
@@ -231,6 +252,10 @@ function RealImageWorkflow() {
         confirmResult,
         phase: confirmResult.build_result.physical_system !== null ? "verified" : "incomplete",
       }));
+      // Every (re-)verification produces a new physical system, even if the
+      // numbers happen to match the previous one -- any prior autonomous
+      // redesign result must never be shown against a different system.
+      setRedesign(INITIAL_REDESIGN_UI_STATE);
     } catch (caught) {
       setState((previous) => ({
         ...previous,
@@ -243,9 +268,36 @@ function RealImageWorkflow() {
     }
   }
 
+  function handleObjectiveChange(value: string) {
+    setRedesign((previous) => withObjectiveChanged(previous, value));
+  }
+
+  async function handleLaunchRedesign() {
+    const startingTrain = deriveStartingTrain(state.confirmResult);
+    const objective = Number(redesign.objectiveInput.trim());
+    if (!startingTrain || !Number.isFinite(objective) || objective <= 0) return;
+
+    setRedesign((previous) => withRedesignStarted(previous));
+    try {
+      const result = await runAutonomousRedesign(startingTrain, objective);
+      setRedesign((previous) => withRedesignSucceeded(previous, result));
+    } catch (caught) {
+      setRedesign((previous) =>
+        withRedesignFailed(
+          previous,
+          caught instanceof ForgeApiError
+            ? caught.message
+            : "Could not reach the FORGE backend. Is it running?",
+        ),
+      );
+    }
+  }
+
   const trace = buildRealImageTrace(state.analysis, state.confirmResult);
   const hasConfirmationStage =
     state.phase === "observed" || state.phase === "verifying" || state.phase === "incomplete" || state.phase === "verified";
+  const isVerified = hasVerifiedPhysics(state.confirmResult);
+  const startingTrain = isVerified ? deriveStartingTrain(state.confirmResult) : null;
 
   return (
     <>
@@ -324,6 +376,21 @@ function RealImageWorkflow() {
           <RealImageResultPanel confirmResult={state.confirmResult} />
         </Panel>
       </div>
+
+      {isVerified && (
+        <Panel title="Autonomous Engineering" eyebrow="06">
+          <AutonomousRedesignPanel
+            startingTrain={startingTrain}
+            verifiedOutputRpm={state.confirmResult!.experiment!.experiment.result ?? 0}
+            objectiveInput={redesign.objectiveInput}
+            onObjectiveChange={handleObjectiveChange}
+            onLaunch={handleLaunchRedesign}
+            isRunning={redesign.isRunning}
+            result={redesign.result}
+            apiError={redesign.apiError}
+          />
+        </Panel>
+      )}
     </>
   );
 }

@@ -1,7 +1,9 @@
 import type {
   AnalyzeImageResult,
+  AutonomousRedesignResult,
   ConfirmAndVerifyResult,
   FixtureId,
+  GearTrain,
   PerceptionResult,
   PhysicalConfirmation,
   PhysicalPipelineResult,
@@ -132,4 +134,42 @@ export async function confirmAndVerify(
   }
 
   return body as ConfirmAndVerifyResult;
+}
+
+/**
+ * Launch the bounded autonomous engineering redesign loop: Muse Spark
+ * proposes candidate (input_teeth, output_teeth) pairs for a fixed-topology
+ * two-gear transmission, and FORGE's deterministic physics/constraint
+ * engine is the sole authority on PASS/FAIL. This function performs no
+ * physics, no constraint evaluation, and no redesign logic itself -- it
+ * only sends the trusted starting design (derived from the already-
+ * verified 7A physical state, never hardcoded) and the objective, and
+ * returns exactly what the backend computed.
+ */
+export async function runAutonomousRedesign(
+  startingTrain: GearTrain,
+  objectiveMaxOutputRpm: number,
+  signal?: AbortSignal,
+): Promise<AutonomousRedesignResult> {
+  const response = await fetch(`${getApiBaseUrl()}/api/v1/forge/autonomous-redesign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      starting_train: startingTrain,
+      objective_max_output_rpm: objectiveMaxOutputRpm,
+    }),
+    signal,
+  });
+
+  const body: unknown = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const detail =
+      body && typeof body === "object" && "detail" in body
+        ? (body as { detail: unknown }).detail
+        : body;
+    throw new ForgeApiError(response.status, detail);
+  }
+
+  return body as AutonomousRedesignResult;
 }

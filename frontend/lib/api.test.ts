@@ -1,8 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { analyzeImage, confirmAndVerify, ForgeApiError } from "./api.ts";
-import type { AnalyzeImageResult, ConfirmAndVerifyResult, PerceptionResult, PhysicalConfirmation } from "./forge-types.ts";
+import { analyzeImage, confirmAndVerify, ForgeApiError, runAutonomousRedesign } from "./api.ts";
+import type {
+  AnalyzeImageResult,
+  AutonomousRedesignResult,
+  ConfirmAndVerifyResult,
+  GearTrain,
+  PerceptionResult,
+  PhysicalConfirmation,
+} from "./forge-types.ts";
 
 /**
  * These tests mock the global `fetch` so no real network call -- and
@@ -132,6 +139,112 @@ test("confirmAndVerify throws ForgeApiError on refusal responses (e.g. unknown g
           confirmAndVerify(
             { shafts: [], gears: [], meshes: [], input_shaft_id: null, input_rpm: null, output_shaft_id: null, notes: [] },
             { shafts: [], gears: [{ id: "bad", confirmed_exists: true }], meshes: [] },
+          ),
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof ForgeApiError);
+      assert.equal(error.status, 422);
+      return true;
+    },
+  );
+});
+
+// --- G. autonomous-redesign request sends the exact starting_train/objective
+
+function minimalRedesignResult(): AutonomousRedesignResult {
+  return {
+    objective: "output_rpm <= 300.0",
+    status: "exhausted",
+    attempts: [],
+    accepted_design: null,
+    final_experiment: null,
+    trace: [],
+  };
+}
+
+test("runAutonomousRedesign sends starting_train and objective_max_output_rpm as JSON", async () => {
+  const startingTrain: GearTrain = {
+    input_rpm: 1200,
+    input_direction: 1,
+    connections: [
+      { driver: { id: "input", teeth: 20, label: null }, driven: { id: "output", teeth: 60, label: null } },
+    ],
+  };
+
+  let capturedUrl = "";
+  let capturedInit: RequestInit | undefined;
+  await withMockedFetch(
+    (url, init) => {
+      capturedUrl = url;
+      capturedInit = init;
+      return new Response(JSON.stringify(minimalRedesignResult()), { status: 200 });
+    },
+    () => runAutonomousRedesign(startingTrain, 300),
+  );
+
+  assert.ok(capturedUrl.endsWith("/api/v1/forge/autonomous-redesign"));
+  assert.equal(capturedInit?.method, "POST");
+  assert.equal((capturedInit?.headers as Record<string, string>)["Content-Type"], "application/json");
+  const sentBody = JSON.parse(capturedInit!.body as string);
+  assert.deepEqual(sentBody.starting_train, startingTrain);
+  assert.equal(sentBody.objective_max_output_rpm, 300);
+  // No physics/PASS-FAIL computed client-side -- the request carries only
+  // the trusted starting design and the objective, nothing derived.
+  assert.deepEqual(Object.keys(sentBody).sort(), ["objective_max_output_rpm", "starting_train"]);
+});
+
+test("runAutonomousRedesign returns the exact backend response unmodified", async () => {
+  const backendResult: AutonomousRedesignResult = {
+    objective: "output_rpm <= 300.0",
+    status: "verified",
+    attempts: [
+      {
+        attempt_number: 1,
+        candidate: { input_teeth: 20, output_teeth: 80 },
+        experiment: {
+          tool: "compute_gear_train_output_rpm",
+          inputs: {},
+          result: 300,
+          unit: "rpm",
+          status: "success",
+          error: null,
+          metrics: { output_rpm: 300, gear_ratio: 4, output_direction: -1 },
+          constraint_results: [],
+        },
+        status: "passed",
+        error: null,
+      },
+    ],
+    accepted_design: { input_teeth: 20, output_teeth: 80 },
+    final_experiment: null,
+    trace: [],
+  };
+
+  const result = await withMockedFetch(
+    () => new Response(JSON.stringify(backendResult), { status: 200 }),
+    () =>
+      runAutonomousRedesign(
+        { input_rpm: 1200, input_direction: 1, connections: [] },
+        300,
+      ),
+  );
+
+  assert.deepEqual(result, backendResult);
+});
+
+test("runAutonomousRedesign throws ForgeApiError on an unsupported-topology refusal", async () => {
+  await assert.rejects(
+    () =>
+      withMockedFetch(
+        () =>
+          new Response(
+            JSON.stringify({ detail: "Milestone 7B.1 only supports a single external two-gear mesh" }),
+            { status: 422 },
+          ),
+        () =>
+          runAutonomousRedesign(
+            { input_rpm: 1200, input_direction: 1, connections: [] },
+            300,
           ),
       ),
     (error: unknown) => {

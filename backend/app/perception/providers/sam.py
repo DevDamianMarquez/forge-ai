@@ -40,11 +40,16 @@ _SOURCE = ObservationSource.VISION_MODEL
 _STATUS = ObservationStatus.OBSERVED
 
 
-def _segmentation_id(frame_index: int, object_index: int) -> str:
+def segmentation_id(frame_index: int, object_index: int) -> str:
     """A stable, lightweight identifier traceable back to the exact SAM
     segmentation that produced this perceived object (e.g. "sam-f0-o1" for
     frame 0, object 1). Carries no geometry or mask payload itself -- just
     enough to answer "which SAM detection became this PerceivedGear?".
+
+    Public (not module-private) so that any caller needing to correlate a
+    PerceivedGear back to its raw SAM segmentation -- e.g. a safe visual
+    detection DTO that also needs the segmentation's bounding box -- can
+    reuse this exact id construction instead of duplicating it.
     """
     return f"sam-f{frame_index}-o{object_index}"
 
@@ -66,7 +71,7 @@ def convert_sam_result_to_perception(
     """
     gears = [
         PerceivedGear(
-            id=_segmentation_id(seg.frame_index, seg.object_index),
+            id=segmentation_id(seg.frame_index, seg.object_index),
             label=label,
             source=_SOURCE,
             confidence=seg.bounding_box.confidence,
@@ -109,10 +114,26 @@ class SAMPerceptionProvider:
         self._client = client if client is not None else SAMClient()
 
     def analyze(self, request: ImagePerceptionRequest) -> PerceptionResult:
+        perception, _sam_result = self.analyze_with_raw_result(request)
+        return perception
+
+    def analyze_with_raw_result(
+        self, request: ImagePerceptionRequest
+    ) -> tuple[PerceptionResult, SAMSegmentationResult]:
+        """Same as ``analyze``, but also returns the raw SAMSegmentationResult
+        the PerceptionResult was derived from.
+
+        ``analyze`` itself is unchanged and still returns only the
+        provider-independent PerceptionResult, satisfying the generic
+        ``PerceptionProvider`` contract. This method exists only for callers
+        (e.g. the image-analysis service) that must also expose safe visual
+        detection geometry -- bounding boxes -- alongside perception,
+        without widening PerceivedGear itself with SAM-specific fields.
+        """
         sam_result = self._client.analyze_image(
             request.prompt,
             image_url=request.image_url,
             image_bytes=request.image_bytes,
             image_mime_type=request.image_mime_type,
         )
-        return convert_sam_result_to_perception(sam_result)
+        return convert_sam_result_to_perception(sam_result), sam_result

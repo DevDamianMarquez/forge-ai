@@ -337,7 +337,11 @@ export interface RedesignTraceEntry {
 }
 
 /** Response of POST /api/v1/forge/autonomous-redesign. ``accepted_design``/
- * ``final_experiment`` are non-null only when ``status === "verified"``. */
+ * ``final_experiment`` are non-null only when ``status === "verified"``.
+ * ``engineering_explanation`` is a plain-text restatement of this same
+ * evidence, built backend-side purely from ``status``/``accepted_design``/
+ * ``final_experiment`` -- it carries no authority of its own and must only
+ * ever be rendered as-is, never used to decide anything in the frontend. */
 export interface AutonomousRedesignResult {
   objective: string;
   status: RedesignStatus;
@@ -345,6 +349,7 @@ export interface AutonomousRedesignResult {
   accepted_design: GearRedesignCandidate | null;
   final_experiment: ExperimentResult | null;
   trace: RedesignTraceEntry[];
+  engineering_explanation: string | null;
 }
 
 /** Request body for POST /api/v1/forge/autonomous-redesign. ``starting_train``

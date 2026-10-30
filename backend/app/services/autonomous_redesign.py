@@ -24,6 +24,13 @@ always computes the physical result. Deterministic constraint code always
 decides PASS/FAIL. Muse receives that evidence and may propose another
 candidate. Only a deterministic PASS can ever produce a VERIFIED result --
 this holds even if Muse's own text claims success.
+
+Milestone 8C adds ``AutonomousRedesignResult.engineering_explanation``: a
+plain-text restatement of this same structured evidence, built by
+``_build_engineering_explanation`` strictly after ``status``,
+``accepted_design``, and ``final_experiment`` are already final. It is pure
+string formatting over already-computed data -- no new Muse/Meta call, no
+recomputation, no effect on the outcome it describes.
 """
 
 from __future__ import annotations
@@ -197,6 +204,17 @@ class AutonomousRedesignResult(BaseModel):
     accepted_design: GearRedesignCandidate | None = None
     final_experiment: ExperimentResult | None = None
     trace: list[RedesignTraceEntry] = Field(default_factory=list)
+    engineering_explanation: str | None = Field(
+        default=None,
+        description=(
+            "A human-readable summary of this run's own structured evidence "
+            "(objective, starting design, attempts, final result) -- plain "
+            "formatting, never a new reasoning step. It carries no authority: "
+            "`status`/`accepted_design`/`final_experiment` remain the sole "
+            "PASS/FAIL/VERIFIED authority, decided entirely before this "
+            "string is built."
+        ),
+    )
 
 
 def _tool_schema() -> dict[str, Any]:
@@ -252,6 +270,132 @@ def _is_passing(experiment: ExperimentResult) -> bool:
         and bool(experiment.constraint_results)
         and all(constraint_result.passed for constraint_result in experiment.constraint_results)
     )
+
+
+def _format_number(value: float, decimals: int = 2) -> str:
+    """Round a value for one prose sentence and trim trailing zeros.
+
+    Display-only: it never feeds back into any physics, constraint, or
+    verification decision, all of which are already final by the time this
+    runs on already-computed values.
+    """
+    text = f"{value:.{decimals}f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def _describe_direction(output_direction: float | None) -> str:
+    if output_direction is None:
+        return "unspecified"
+    return "reversed relative to the input" if output_direction < 0 else "the same as the input"
+
+
+def _build_engineering_explanation(
+    *,
+    status: RedesignStatus,
+    objective_max_output_rpm: float,
+    input_rpm: float,
+    starting_connection: GearConnection,
+    baseline: ExperimentResult,
+    attempts: list[RedesignAttempt],
+    accepted_design: GearRedesignCandidate | None,
+    final_experiment: ExperimentResult | None,
+) -> str | None:
+    """A deterministic, human-readable restatement of evidence this run
+    already produced -- never a new reasoning step, network call, or
+    verification mechanism.
+
+    Every quoted number is read directly from already-computed structured
+    data (``baseline``, ``attempts``, ``final_experiment``); nothing here is
+    estimated, recalculated, or inferred. This function has no authority
+    over the outcome -- ``status``/``accepted_design``/``final_experiment``
+    are decided entirely before it runs and are never altered by it. For a
+    non-VERIFIED run, every sentence is phrased so it cannot be read as a
+    claim of success.
+    """
+    starting_in = starting_connection.driver.teeth
+    starting_out = starting_connection.driven.teeth
+    baseline_rpm = baseline.result
+    objective_text = _format_number(objective_max_output_rpm)
+
+    if baseline_rpm is None:
+        # The starting design itself produced a physics error -- there is no
+        # coherent baseline evidence to describe.
+        return None
+
+    baseline_clause = (
+        f"exceeding the requested maximum of {objective_text} RPM."
+        if baseline_rpm > objective_max_output_rpm
+        else f"which already satisfies the requested maximum of {objective_text} RPM."
+    )
+    sentences = [
+        f"The original {starting_in}T -> {starting_out}T transmission produced "
+        f"{_format_number(baseline_rpm)} RPM, {baseline_clause}"
+    ]
+
+    if status == RedesignStatus.VERIFIED:
+        if accepted_design is None or final_experiment is None or final_experiment.result is None:
+            # VERIFIED always carries both in practice; never guess if not.
+            return None
+
+        prior_failed = next(
+            (
+                attempt
+                for attempt in attempts
+                if attempt.status == RedesignAttemptStatus.FAILED
+                and attempt.candidate is not None
+                and attempt.experiment is not None
+                and attempt.experiment.result is not None
+                # Skip a first candidate that just re-tests the starting
+                # design already described above -- nothing new to add.
+                and (attempt.candidate.input_teeth, attempt.candidate.output_teeth)
+                != (starting_in, starting_out)
+            ),
+            None,
+        )
+        if prior_failed is not None:
+            sentences.append(
+                f"An earlier candidate ({prior_failed.candidate.input_teeth}T -> "  # type: ignore[union-attr]
+                f"{prior_failed.candidate.output_teeth}T) produced "  # type: ignore[union-attr]
+                f"{_format_number(prior_failed.experiment.result)} RPM, which did not satisfy "  # type: ignore[union-attr]
+                "the objective, so FORGE evaluated another candidate."
+            )
+
+        ratio = final_experiment.metrics.get("gear_ratio")
+        direction = final_experiment.metrics.get("output_direction")
+        ratio_clause = f", yielding a gear ratio of {_format_number(ratio)}:1" if ratio is not None else ""
+        sentences.append(
+            f"FORGE evaluated a {accepted_design.input_teeth}T -> {accepted_design.output_teeth}T "
+            f"candidate{ratio_clause}."
+        )
+        sentences.append(
+            f"With an input speed of {_format_number(input_rpm)} RPM, the deterministic physics "
+            f"engine calculated an output speed of {_format_number(final_experiment.result)} RPM, "
+            f"with the output direction {_describe_direction(direction)}."
+        )
+        sentences.append(
+            f"Since {_format_number(final_experiment.result)} RPM is within the maximum allowed "
+            f"{objective_text} RPM, this design satisfies the engineering objective, verified by "
+            "FORGE's deterministic physics engine."
+        )
+        return " ".join(sentences)
+
+    if status == RedesignStatus.EXHAUSTED:
+        tested = [attempt for attempt in attempts if attempt.experiment is not None]
+        sentences.append(
+            f"FORGE evaluated {len(tested)} candidate(s) attempting to satisfy this objective, "
+            "but none produced a passing result within the available attempt budget."
+        )
+        if final_experiment is not None and final_experiment.result is not None:
+            sentences.append(
+                f"The most recent candidate tested produced {_format_number(final_experiment.result)} "
+                "RPM, which did not satisfy the objective."
+            )
+        sentences.append("No design was verified by FORGE's deterministic physics engine.")
+        return " ".join(sentences)
+
+    return None
 
 
 def run_autonomous_redesign(
@@ -368,6 +512,16 @@ def run_autonomous_redesign(
                 accepted_design=attempt.candidate,
                 final_experiment=attempt.experiment,
                 trace=trace,
+                engineering_explanation=_build_engineering_explanation(
+                    status=RedesignStatus.VERIFIED,
+                    objective_max_output_rpm=objective_max_output_rpm,
+                    input_rpm=input_rpm,
+                    starting_connection=starting_connection,
+                    baseline=baseline,
+                    attempts=attempts,
+                    accepted_design=attempt.candidate,
+                    final_experiment=attempt.experiment,
+                ),
             )
 
     trace.append(
@@ -387,6 +541,16 @@ def run_autonomous_redesign(
         attempts=attempts,
         final_experiment=last_experiment,
         trace=trace,
+        engineering_explanation=_build_engineering_explanation(
+            status=RedesignStatus.EXHAUSTED,
+            objective_max_output_rpm=objective_max_output_rpm,
+            input_rpm=input_rpm,
+            starting_connection=starting_connection,
+            baseline=baseline,
+            attempts=attempts,
+            accepted_design=None,
+            final_experiment=last_experiment,
+        ),
     )
 
 

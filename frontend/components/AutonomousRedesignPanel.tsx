@@ -258,6 +258,7 @@ function FinalResult({ result }: { result: AutonomousRedesignResult }) {
           <Metric label="Ratio" value={formatRatio(experiment.metrics.gear_ratio ?? 0)} />
           <Metric label="Direction" value={formatDirection(experiment.metrics.output_direction ?? 1)} />
         </div>
+        <EngineeringExplanation text={result.engineering_explanation} />
       </div>
     );
   }
@@ -271,6 +272,7 @@ function FinalResult({ result }: { result: AutonomousRedesignResult }) {
         <p className="mt-1 text-xs leading-snug text-forge-text-muted">
           FORGE exhausted its attempt budget without a candidate satisfying the objective.
         </p>
+        <EngineeringExplanation text={result.engineering_explanation} />
       </div>
     );
   }
@@ -283,6 +285,24 @@ function FinalResult({ result }: { result: AutonomousRedesignResult }) {
       <p className="mt-1 text-xs leading-snug text-forge-text-muted">
         Muse Spark could not complete this redesign run.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Clearly secondary to the numeric evidence above it: renders exactly the
+ * backend-provided string, verbatim, as plain prose. Never parses it,
+ * never derives PASS/FAIL/VERIFIED from it, never recomputes anything --
+ * the authoritative evidence is the Metric values above, not this text.
+ */
+function EngineeringExplanation({ text }: { text: string | null }) {
+  if (!text) return null;
+  return (
+    <div className="mt-3 border-t border-forge-border/60 pt-2.5">
+      <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-forge-text-dim">
+        Engineering Explanation
+      </p>
+      <p className="mt-1 text-xs leading-snug text-forge-text-muted">{text}</p>
     </div>
   );
 }

@@ -148,6 +148,7 @@ function minimalRedesignResult(overrides: Partial<AutonomousRedesignResult> = {}
     accepted_design: null,
     final_experiment: null,
     trace: [],
+    engineering_explanation: null,
     ...overrides,
   };
 }

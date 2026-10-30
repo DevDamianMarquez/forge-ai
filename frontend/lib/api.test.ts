@@ -159,6 +159,7 @@ function minimalRedesignResult(): AutonomousRedesignResult {
     accepted_design: null,
     final_experiment: null,
     trace: [],
+    engineering_explanation: null,
   };
 }
 
@@ -218,6 +219,7 @@ test("runAutonomousRedesign returns the exact backend response unmodified", asyn
     accepted_design: { input_teeth: 20, output_teeth: 80 },
     final_experiment: null,
     trace: [],
+    engineering_explanation: "Final design satisfies the objective.",
   };
 
   const result = await withMockedFetch(

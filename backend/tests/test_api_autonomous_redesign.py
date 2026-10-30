@@ -57,6 +57,11 @@ def test_autonomous_redesign_endpoint_canonical_fail_then_pass():
     assert body["attempts"][0]["status"] == "failed"
     assert body["attempts"][1]["status"] == "passed"
     assert [entry["stage"] for entry in body["trace"]][-1] == "design_verified"
+    # Milestone 8C: the human-readable explanation round-trips through the
+    # HTTP response unchanged -- plain additional evidence, not a new field
+    # that replaces or recomputes any of the structured evidence above.
+    assert isinstance(body["engineering_explanation"], str)
+    assert "20T -> 80T" in body["engineering_explanation"]
 
 
 def test_autonomous_redesign_endpoint_exhausts_on_all_failing_candidates():

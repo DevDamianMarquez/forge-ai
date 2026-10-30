@@ -52,3 +52,13 @@ app.include_router(forge_router, prefix="/api/v1")
 app.include_router(image_analysis_router, prefix="/api/v1")
 app.include_router(perception_router, prefix="/api/v1")
 app.include_router(pipeline_router, prefix="/api/v1")
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    """Static liveness check for platform health probes (e.g. Railway).
+
+    No auth, no MODEL_API_KEY, no Muse/SAM/network/filesystem access --
+    just a constant response so the probe is cheap and always succeeds.
+    """
+    return {"status": "ok"}
